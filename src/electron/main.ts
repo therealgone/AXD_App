@@ -6,9 +6,13 @@ import { isDev } from "./util.js"
 import puppeteer from 'puppeteer-core';
 import pie from 'puppeteer-in-electron';
 import { fileURLToPath } from 'url';
+import { table } from "console";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+app.commandLine.appendSwitch('ignore-certificate-errors', 'true');
+app.commandLine.appendSwitch('allow-insecure-localhost', 'true'); 
 
 pie.initialize(app);
 
@@ -17,6 +21,7 @@ let mainWindow: BrowserWindow | null = null;
 
 async function login(cer: { username: string, password: string }, window: BrowserWindow) {
     console.log("pup running");
+    
     const browser = await pie.connect(app, puppeteer);
     const page = await pie.getPage(browser, window);
 
@@ -36,19 +41,60 @@ async function login(cer: { username: string, password: string }, window: Browse
         await frame.waitForSelector('#login_id', { visible: true, timeout: 15000 });
 
         console.log('Form found in frame! Typing username...');
-        await frame.type("#login_id", cer.username);
+        await frame.type("#login_id", cer.username); 
+        
         await frame.click("#nextbtn");
         
        
         await frame.waitForSelector('#password', { visible:true ,timeout: 15000});
 
 
-        await frame.type("#password", cer.password );
+       await frame.type("#password", cer.password );
+       
         
         await frame.waitForSelector('#nextbtn' , {visible:true})
         await frame.click("#nextbtn");
         
         await page.waitForNavigation({ waitUntil: "networkidle2" });
+ 
+        await page.goto ("https://academia.srmist.edu.in/#Page:My_Attendance")
+
+console.log("Start Data Collection");
+
+        await page.waitForSelector('table', { visible: true, timeout: 15000 });
+       
+        const tableData = await page.$$eval('table[bgcolor="#FAFAD2"] tr', rows => {
+    return rows.slice(1).map(row => {
+        const cells = row.querySelectorAll('td');
+        const p = 0.75
+        const abs = Number(cells[7]?.innerText.trim() || 0)
+        const hr = Number(cells[6]?.innerText.trim() || 0)
+        const attended = hr-abs
+        const cal = (p * hr - attended ) / (1 - p)
+        const need = Math.ceil(cal > 0 ? cal : 0);
+        const margin = Math.floor((attended - p * hr) / p);
+        const safeMargin = margin > 0 ? margin : 0; 
+        return {
+            courseCode: cells[0]?.innerText.trim(),
+            
+            attendance: cells[8]?.innerText.trim(),
+
+            Req: need,
+            Margin: safeMargin,
+
+
+        };
+    });
+});
+
+console.log(tableData);
+
+
+       
+
+        
+
+
         
         console.log("Login successful!");
        
@@ -71,7 +117,6 @@ ipcMain.handle('login:start', async (event, cer) => {
 });
 
 app.on("ready", () => {
-    // Assign the created window to the variable we declared outside
     mainWindow = new BrowserWindow({
         webPreferences: {
             preload: path.join(__dirname, 'preload.cjs'),
@@ -81,12 +126,11 @@ app.on("ready", () => {
     });
 
     if (isDev()) {
-        mainWindow.loadURL('http://localhost:5123')
+        mainWindow.loadURL('http://localhost:5123');
     } else {
         mainWindow.loadFile(path.join(app.getAppPath(), "/dist-react/index.html"));
     }
 
-    // Set mainWindow to null when it's closed to prevent memory leaks
     mainWindow.on('closed', () => {
         mainWindow = null;
     });
